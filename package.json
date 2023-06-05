@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "start": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "start2": "ts-node-dev --respawn --transpile-only src/throttling.ts",
     "load:test": "ts-node src/load-test.ts"
   },
   "dependencies": {
