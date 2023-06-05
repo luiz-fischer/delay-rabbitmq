@@ -1,4 +1,8 @@
-import amqp from 'amqplib';
+import express from 'express';
+import amqp, { Channel } from 'amqplib'; // Import Channel type
+
+const app = express();
+app.use(express.json());
 
 const rabbitMQConfig = {
   protocol: 'amqp',
@@ -8,45 +12,56 @@ const rabbitMQConfig = {
   password: 'guest',
 };
 
-const exchange = 'my_delayed_exchange';
-const routingKey = 'test.message'; // Adjust the routing key according to your setup
+const queue = 'delayed_queue';
+const responseQueue = 'response_queue'; // The queue for receiving the response
+const numMessages = 100;
 
-const numMessages = 100; // Define the number of messages to publish
+let channel: Channel; // Declare channel with its proper type
 
-async function publishMessagesToRabbitMQ() {
-  try {
-    const connection = await amqp.connect(rabbitMQConfig);
-    const channel = await connection.createConfirmChannel();
+async function sendMessagesToRabbitMQ() {
+  const queueOptions = {
+    durable: true,
+  };
 
-    const exchangeOptions = {
-      durable: true,
+  await channel.assertQueue(queue, queueOptions);
+  await channel.assertQueue(responseQueue, queueOptions);
+
+  for (let i = 1; i <= numMessages; i++) {
+    const message = {
+      id: i,
+      content: `Message ${i}`,
+    };
+    const messageContent = JSON.stringify(message);
+
+    const msgOptions = {
+      persistent: true,
     };
 
-    await channel.assertExchange(exchange, 'topic', exchangeOptions);
+    channel.sendToQueue(queue, Buffer.from(messageContent), msgOptions);
+    console.log(`Message ${messageContent} sent to RabbitMQ and awaiting processing confirmation...`);
+  }
 
-    for (let i = 1; i <= numMessages; i++) {
-      const message = {
-        id: i,
-        content: `Message ${i}`,
-      };
-      const messageContent = JSON.stringify(message);
-
-      const msgOptions = {
-        persistent: true,
-      };
-
-      channel.publish(exchange, routingKey, Buffer.from(messageContent), msgOptions);
-
-      await channel.waitForConfirms();
-
-      console.log('Message published to RabbitMQ:', messageContent);
+  channel.consume(responseQueue, (msg) => {
+    if (msg !== null) {
+      console.log(`Received confirmation: ${msg.content.toString()}`);
+      channel.ack(msg);
     }
+  });
+}
 
-    await channel.close();
-    await connection.close();
+async function connectToRabbitMQ() {
+  try {
+    const connection = await amqp.connect(rabbitMQConfig);
+    channel = await connection.createChannel();
   } catch (error) {
-    console.error('Error publishing messages to RabbitMQ:', error);
+    console.error('Error connecting to RabbitMQ:', error);
   }
 }
 
-publishMessagesToRabbitMQ();
+connectToRabbitMQ().then(() => {
+  sendMessagesToRabbitMQ();
+});
+
+app.listen(3001, () => {
+  console.log('Server is running on port 3001');
+});

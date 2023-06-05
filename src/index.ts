@@ -12,9 +12,8 @@ const rabbitMQConfig = {
   password: 'guest',
 };
 
-const exchange = 'my_delayed_exchange';
-const queue = 'my_delayed_queue';
-const routingKey = 'test.*'; // Pattern for topic-based routing
+const queue = 'delayed_queue';
+const responseQueue = 'response_queue';
 
 let channel;
 
@@ -23,16 +22,10 @@ const processQueue = async () => {
     const connection = await amqp.connect(rabbitMQConfig);
     channel = await connection.createChannel();
 
-    // channel.prefetch(10, false); // Definir prefetch count de 10 apenas para o consumidor atual
-    channel.prefetch(10, true); // Definir prefetch count de 10 globalmente para todos os consumidores no canal
+    channel.prefetch(10, true);
 
-    const exchangeOptions = {
-      durable: true,
-    };
-
-    await channel.assertExchange(exchange, 'topic', exchangeOptions);
     await channel.assertQueue(queue, { durable: true });
-    await channel.bindQueue(queue, exchange, routingKey);
+    await channel.assertQueue(responseQueue, { durable: true }); // Assert the response queue
 
     console.log('Waiting for messages...');
 
@@ -49,32 +42,36 @@ const processQueue = async () => {
   }
 };
 
-const delay = (duration) => new Promise((resolve) => setTimeout(resolve, duration));
+const delay = (duration) => new Promise((resolve) => setTimeout(resolve, 5000));
 
 const processMessage = async (message) => {
   console.log(`Processing message ${message}`);
 
   try {
-    if (Math.random() < 0.5) {
+    if (Math.random() < 0.1) {
       throw new Error('Failed processing')
     }
-    await delay(2000); // Simulate an asynchronous process with a delay
+    await delay(2000);
 
     console.log(`Completed processing message ${message}`);
+    sendConfirmation(message);
   } catch (error) {
     console.error('Error processing message:', error);
-
-    const msgOptions = {
-      headers: { 'x-delay': 5000 },
-      persistent: true,
-    };
-
-    console.log('Sending message back to RabbitMQ:', message);
-    channel.publish(exchange, routingKey, Buffer.from(message), msgOptions);
   }
 };
 
+const sendConfirmation = (message) => {
+  const confirmationMessage = `Message ${message} processed successfully.`;
+  const msgOptions = {
+    persistent: true,
+  };
+  
+  console.log('Sending confirmation to RabbitMQ:', confirmationMessage);
+  channel.sendToQueue(responseQueue, Buffer.from(confirmationMessage), msgOptions); // Send confirmation to the response queue
+}
+
 processQueue();
+
 
 app.listen(3000, () => {
   console.log('Server is running on port 3000');
